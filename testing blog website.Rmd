@@ -1,0 +1,222 @@
+---
+title: "Lessons Learned with FDSRx"
+subtitle: "Blog"
+author: "Problem Forward"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: 
+    html_document:
+        theme: yeti
+        toc: true
+        toc_depth: 3
+        toc_float: 
+            collapsed: false
+        fig_caption: yes
+    self_contained: true
+mainfont: Roboto
+---
+
+```{r logo, echo=FALSE}
+img = htmltools::img(src = knitr::image_uri("PFlogo.png"), 
+               alt = 'PFlogo', 
+               style = 'position:absolute; top:0; right:0; padding:10px;',
+               height = "50%",
+               width = "25%",
+               align = "right")
+
+img
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+This project was about working with machine learning models and predictions while sourcing from an online cloud object. IN THE MIDDLE OF THE HOLIDAYS. Talk about stress! 
+
+This is how we did it:
+  (Talk about how we had to establish authorization for BigQuery)
+  After establishing access on the cloud system for all persons working on the project, we create connnection objects within the RStudio project session and save within our local environment. Unless your team is set up with Version Control, each individual will have to create the connection object within their own workspace and global environment.
+  Install or load:
+    
+  - `install.packages("DBI")`
+  - `install.packages("bigrquery")`
+  
+  These packages allow R to interact with Google's BigQuery (which is an online Database Management System) smoothly. Once installed and loaded you can begin setting up your local connection. 
+  Create a new `.R` or `.r` script and you are able to save the con /(connection) object within the local environment.
+  The code should look similar too:
+    ```{r, echo = TRUE, eval = FALSE}
+  # function within DBI package
+  con = dbConnect(
+  # specifies which DBMS
+    bigquery(),
+    project = "your_proj_here",
+    dataset = "your_dataset_here"
+  )
+    ```
+  Once saved into your local and global environment, put the .r/.R script into the `.gitignore` file. Make sure everyone on the team does this or your data will be accessed by all (remember: version control)! While we are setting up connections run this line of code through your console `options(httr_oob_default = TRUE)`; this allows a simple bypass as R is natural setup to ensure Oauth tokens. (Technically the con is this, BUUUT R is fickle.) 
+    Annoying Reminder: Run this code everytime R loads | set add into preloaded code chunks that run when you automaticaly start a session. There's a lot of blogs about how to create preloads if you need guidance. Sad to say, this isn't one...moving onward! 
+      
+  There's going to be a message that pops up in the console similar to this: 
+    
+    `# Use a local file ('.httr-oauth'), to cache OAuth access credentials between R sessions?
+    # 
+    # 1: Yes
+    # 2: No`
+      
+Depending on how secure you want your connection to be will determine which option you choose. 
+  More or less:
+    1 = Local file is created but whoever has access to your computer will have access to the file.
+    2 = No file is created and you are brought through a secondary verification process. Copy access code from new tab into console.
+This particular client had pretty sweet info so we choose to go with the second option along with other security measures.
+    If you are working with R or RStudio, you've noticed memory capacities and other slightly annoying errors encountered with working with large datasets. If you're reading this, you know exactly what I'm referring too:
+      
+      - Can't pull DataSets/Tables with over 100k rows without crashing R.
+      - Memory issues where the app just crashes (doesn't even give an actual error code sometimes; I'm still locked out of one of my R sessions.) etc etc.
+    
+  FORTUNATELY enough for you BigQuery helps R by doing a "LazyQuery" where BigQuery translates R into SQL, applies filters/functions you coded to a small section of the datatable and then prints a "10 x ??" tibble for you. 
+  Although this may feel unsecure, the small tables allow you to see IF your filters/functions were applied properly!
+    This is also where the `dplyr::count()` and `dplyr::collect()` calls come in clutch. `dplyr::count()` acts as a a wrapper with `group_by` and `ungroup`. This allows all things to be accounted for according to the respective filters. `dplyr::collect()` allows local tibbles to be created. Ex:
+    
+```{r, echo = TRUE, eval = FALSE}
+# count groups the variables within specified column as factors without having to use as.factor(). After computation has been printed count() automaticaly ungroups. 
+  mtcars %>%
+    count(cyl)
+  # A tibble: 3 x 2
+  #      cyl     n
+  #     <dbl> <int>
+  # 1     4    11
+  # 2     6     7
+  # 3     8    14
+
+# collect allows the table to be created into the local environment by pulling and retrieving data from the SQL query on the DBMS. 
+# if this was only called  without collect the R session would crash because R will pull entire dataset.
+  mtcars %>%
+   select(gear, cyl) %>%
+   group_by(gear) %>%
+   summarise(cyl_amount = n_distinct(cyl)) %>%
+   collect()
+  # A tibble: 3 x 2
+  # gear cyl_amount
+  # <dbl>      <int>
+  # 1     3          3
+  # 2     4          2
+  # 3     5          3
+```
+
+These two useful functions will allow you to pull and extract data without crashing your session! Just be careful what you collect! 
+      
+Because our client's dataset was so untidy it was extremely stressful tidying!!! BigQuery/SQL saves the certain numeric classes into FLOAT numbers, which can be tricky to integrate into R. R KNOWS these numbers to correlate as `Double-Precision Vectors`. It's super frustating because it's the same thing BUT R just doesn't recognize it as such. /:(
+
+I only bring this up if you have to calculations with your original FLOAT variables. It's a slight pain to convert, re-convert etc etc. To help alleviate some SCRESS load these packages into your sesh:
+  
+```{r, echo = TRUE, eval = FALSE}
+library(devtools)
+library(dplyr)
+library(bigrquery)
+
+# quick promo - shoutout github::@kbmorales
+library(PFbaseproject)
+
+library(DBI)
+library(odbc)
+library(here)
+library(stats)
+library(dbplot)
+library(dbplyr)
+library(stringr)
+# library(scater)
+library(broom)
+```
+  
+With these loaded most FLOAT values should play within R nicely with other NUMERIC or INTEGER variables, but no promises. (._. )
+  
+SEARCHING THROUGH LARGE DATABASES
+
+Woohoooooooooooooooo....no?
+  WELL, learning some regular expression will DEFINITELY help out when finding specifics in R. Especially filtering and sifting through character string variables and you are unsure about what the data hides. For perspective we were working with a DBMS, with 4 Datatables and each table had 3mil+ rows. This may seem normal to most experts, but for a newbie like myself it was overwhelming for sure!!! 
+
+
+There are a few hiccups when working with R and a SQL query. There are certin base R functions that are not recognized within SQL. If you know SQL code working around this shouldn't be hard, if not it's a struggle to work around.
+
+The functions we specifically used in conjunction with regular expressions were `stringr::str_detect` indexed within the column we are inquiring about. Code should look similar to this:
+  
+```{r, echo = TRUE, eval = FALSE}
+  # using zipcodes as an example
+ zip <- con %>%
+   tbl("query_table") %>%
+   select(zipcodes) %>%
+ # when count() & collect() are called without an expression or variable listed inside
+ # the default is to apply the function to all the code above it
+ # only if piped!
+   count() %>%
+   collect()
+ 
+ # tibble we created because of the collect() call
+ # lol
+ zip <- zip[str_detect(zip$zipcode, "\\d{5}-")]
+```
+
+The above line of code is detecting all numeric strings within the tibble `zip` and column `zipcode`, `"\\d"` that include exactly five digits `{5}` and a dash `-`.  
+  
+Because we set zip as a tibble with `count()` AND `collect()` when we call the string detected line of code a tibble will return with the different zipcodes grouped and meeting the requirements listed. Here is an example below:
+  
+```{r, echo = TRUE, eval = FALSE}
+# # A tibble: 13 x 2
+# # Groups:   zipcode [13]
+#   zipcode        n
+#     <chr>      <int>
+# 1  13455-5589      8
+# 2  10452-8001     46
+# 3  10467-2410     37
+# 4  76661-         13
+# 5  09394-        919
+# 6  79079-        456
+# 7  92834-        385
+# 8  15235-5505  44627
+# 9  19013-3840    420
+# 10 19401-4715   1422
+# 11 77640-       3399
+# 12 59860-7037     10
+# 13 NA             NA
+```
+
+Notice that the line of code also returned some numeric strings that had numbers following the dash. That is because in our regular expression there was not an `$` anchor at the end of the expression to tell R that we only want 5 digit zips WITHOUT more numbers. This is something to keep in mind!
+
+Still working with the package `stringr` we were able to truncate strings and split them based on our needs via the client's wants. We ended up using `stringr::str_truncate()` for the zipcodes, as it was easier and provided cleaner code production. There was an issue we had where one column held a lot of information that could be split up for easier wrangling. `stringr::str_split()` definitely helped! It was a column full of alphabetic and numeric character strings that needed to be separated.  
+
+Here's some example reproducible code provided by one of our team leads @[jtleek](https://github.com/jtleek) !
+  
+```{r, echo = TRUE, eval = FALSE}
+# create these extra columns and repeat exactly however many 
+# empty rows needed within the DT, tibble, DF etc etc. 
+newcol1 = newcol2 = newcol3 = rep(NA,dim(dataframe)[1])
+# conditional statement that allows us to detect
+# a string and split the string into sections
+for(i in 1:dim(dataframe)[1]){
+# created function that tells R to look for a "space" 
+# within the name
+  tmp = str_split(dataframe$originalcol[i],"[ ]{1,}")
+# if there are 3 spaces within the string = 1 space
+  if(length(tmp[[1]])==3){
+    newcol1[i] = tmp[[1]][1]
+    newcol2[i] = tmp[[1]][2]
+    newcol3[i] = tmp[[1]][3]
+  }
+# if four spaces do the same
+  if(length(tmp[[1]])==4){
+    newcol1[i] = tmp[[1]][1]
+    newcol2[i] = paste(tmp[[1]][2:3],collapse="")
+    newcol3[i] = tmp[[1]][4]
+  }
+}
+
+# renaming and setting columns
+dataframe$newcol1 = newcol1
+dataframe$newcol2 = newcol2
+dataframe$newcol3 = newcol3
+```
+  
+Also SQL has problems reading large nested code chunks. It will get confused with parenthesises (another random issue). SQL will also not read queries (r code chunks) longer than 1024.00k characters. I ran into this problem a couple of times running a large filtered code chunk I created. Creating functions and source files will help DRAMATICALLY as far as saving ram/memory, cpu, and preventing the error code for long queries. An awesome hot tip to consider!
+
+Let's talk about workflow. . . . 
+Working under different management can be confusing and sometimes challenging. Luckily I am apart of a pretty amazing team, although I recommend that if you're working with a database THAT extensive: try not make the deadline centered around the holidays! Especially if the holiday takes up most of your work week. The team found themselves exhausted and exasporated because of the short amount of time we had to figure this stuff out!
+  
+Please give yourself an adequate amount of time to analyze, improve, test and restructure the project/task at hand!
